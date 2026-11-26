@@ -14,6 +14,7 @@ QA-02 reproduced all four standalone Vulkan queue-handoff cases on the Radeon 86
 | SDK-02 | P0 | Static/shared CMake package and installed C/C++ consumers pass on Windows and Linux. |
 | SR-01 | P0 | The installed [Vulkan SR component](sdk/VULKAN_SR.md) passed the 120-evaluation RTX 2050 profile, readback, resize and history reset. Independent official-runtime validation is tracked in [#24](https://github.com/5headsmartbtw/leonida-framelab/issues/24). |
 | D3D-01 | P0 | The installed [public D3D12 FG component](sdk/D3D12_FG.md) passed the external consumer, real fence/lifetime checks and matched the old readback. |
+| FL-14 | P0 | The opt-in [D3D12 SR component](sdk/D3D12_SR.md) and its external C/C++ consumer are implemented with portable contract tests. Native readback, validation and the RTX 2050 merge gate are pending. [Issue #29](https://github.com/5headsmartbtw/leonida-framelab/issues/29) |
 | VK-01 | P1 | The [standalone image handoff](../tests/vulkan-handoff/README.md) verified binary and timeline waits on distinct queues. Wire it into the FG consumer and test lifetime, cancellation and resize. [Issue #2](https://github.com/5headsmartbtw/leonida-framelab/issues/2) |
 | FFI-01 | P1 | [Raw Rust FFI](../bindings/rust/README.md) passes C layout and shared-library lifecycle tests on Windows and Linux. |
 | INT-01 / INT-02 | P1 | Read-only [Leonida](integrations/leonida/README.md) and [VIctory](integrations/victory/README.md) audits identify consumer seams and missing evidence. |
