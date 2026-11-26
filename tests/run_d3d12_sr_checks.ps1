@@ -36,8 +36,11 @@ foreach ($case in $cases) {
     $arguments = @("`"$runtime`"", "`"$caseLogs`"") + $case.args
     $run = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory (Split-Path $exe) -WindowStyle Hidden `
         -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    # Windows PowerShell 5.1 reports a null ExitCode unless the process handle is opened before the process exits.
+    $null = $run.Handle
     if (-not $run.WaitForExit(600000)) { $run.Kill(); $run.WaitForExit(); throw "Timeout: $($case.name)" }
     $run.WaitForExit()
+    if ($null -eq $run.ExitCode) { throw "Exit code unavailable: $($case.name)" }
     $summaryPath = Join-Path $caseLogs "d3d12-sr-$($case.summary).json"
     $summary = if (Test-Path -LiteralPath $summaryPath) { Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json } else { $null }
     $row = [ordered]@{
