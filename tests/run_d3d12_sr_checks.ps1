@@ -77,3 +77,4 @@ $report = [ordered]@{
 }
 $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $logs 'd3d12-sr-results.json') -Encoding utf8
 if ($failed) { exit 1 }
+exit 0

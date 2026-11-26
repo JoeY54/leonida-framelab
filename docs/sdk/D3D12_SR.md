@@ -2,7 +2,7 @@
 
 The optional `D3D12SR` component exposes native DLSS Super Resolution through a versioned C ABI on Windows x64. It calls Direct NGX from the separately acquired [NVIDIA DLSS SDK](https://github.com/NVIDIA/DLSS). It is off by default. The application owns the device, queue, command lists, allocators, completion fence, resources and presentation. An external project builds against the installed FrameLab package and the public Windows SDK. It needs no NVIDIA headers or libraries.
 
-Status: the component, the portable contract tests and the external consumer are in this repository. Native evaluation on NVIDIA hardware has not been recorded for this revision yet. See [Verification](#verification).
+Status: native evaluation, verified readback, D3D12 debug-layer and GPU-based validation, timing and native device removal passed on an RTX 5090 with the official DLSS 310.9.1 runtime. The RTX 2050 low-memory merge gate is pending. See [Verification](#verification).
 
 ## Build and link
 
@@ -112,9 +112,26 @@ Portable checks run in CI on Linux and Windows without NVIDIA downloads. `d3d12_
 
 The [external consumer](../../samples/d3d12_sr) and [`tests/run_d3d12_sr_checks.ps1`](../../tests/run_d3d12_sr_checks.ps1) run the hardware checks in separate processes. Covered are standard and D3D12 debug-layer correctness runs, GPU-based validation, timing without validation or readback, and native device removal. The checks include verified readback of a known synthetic scene that detects clear-only and stale output, three output configurations with two resizes, a camera cut, missing-input rejection with fallback and recovery, dynamic resolution where the runtime reports a range, cancellation, fence-gated retention, a joined session handle, rejection of FG while SR is alive and NGX re-initialization.
 
-| Hardware run | Result |
+### RTX 5090 with the official runtime
+
+Commit `a2ccd3f` was tested on a GeForce RTX 5090 with driver 621.24 under Windows 11 Pro build 26300.9974. The runtime was `nvngx_dlss.dll` 310.9.1.0 from the DLSS SDK v310.9.1 release directory, with no proxy or layer, so this is an official NVIDIA runtime profile. The SDK was built with MSVC 19.52 from Visual Studio 2026 (`-G "Visual Studio 18 2026"`) and CMake 4.3.1, then installed with D3D12SR and D3D12FG enabled. The external client was built from a separate tree against that install. The SDK CTest passed 5 of 5 tests, and the client CTest passed 1 of 1. The runner passed every case under both Windows PowerShell 5.1 and PowerShell 7.7.
+
+| Case | Result |
 | --- | --- |
-| RTX 5090, official runtime | Not yet run for this revision. |
+| Standard | 20 of 20 evaluations verified and 37 lifecycle checks passed. Covers two resizes, the camera cut, missing-depth fallback and recovery, cancellation followed by reconfiguration, fence-gated retention, a joined session handle, NGX re-initialization, and dynamic resolution at 682×384 in 853×480 textures. 17 of 17 lease callbacks ran. Peak local VRAM was 279 MB. |
+| D3D12 debug layer | Same results, with 0 errors and 0 warnings. Peak local VRAM was 280 MB. |
+| GPU-based validation | Same results, with 0 errors and 0 warnings. Peak local VRAM was 302 MB. |
+| Timing | 600 evaluations at 853×480 → 1280×720 Quality, without validation or readback. GPU time was 0.205 ms at p50 and 0.206 ms at p95. The CPU frame interval was 0.38 ms at p50, with a fence wait every frame. Local VRAM was 43.8 MB before create and 257.9 MB in steady state. The budget was 31,419 MB. |
+| Device removal | `RemoveDevice` was called while a gated frame was in flight. Retirement returned `FRAMELAB_DEVICE_LOST` and released all four leases. Recording and creation on the removed device were rejected. Same-process recovery on a new device verified one frame. 8 of 8 lease callbacks ran. |
+
+The runtime reported optimal render extents and ranges of 853×480 in 640×360–1280×720 for 1280×720 Quality, 557×313 in 480×270–960×540 for 960×540 Balanced, and 640×360 in 640×360–1280×720 for 1280×720 Performance. The saved 1280×720 Performance readback had SHA-256 `91ddc01551539a648d42323cd0ae72a02fdd6e09ed75c554367e24068d9f9f62` in all three correctness runs.
+
+The first run, at `e28aa7a`, verified the same readbacks. The debug-layer runs reported four ID 527 errors on NGX-internal resources right after the discarded recording. Commit `a2ccd3f` removed them by requiring reconfiguration after cancellation. That run also found that Windows PowerShell 5.1 reported a null exit code until the runner read the process handle.
+
+On the same install and machine, the existing [D3D12 FG consumer](../../samples/d3d12_fg) exited with 0. It completed six submissions with five verified interpolations and three final lease releases. Its readback hash differs from the RTX 2050 reference, which used a different runtime profile.
+
+| Remaining hardware run | Status |
+| --- | --- |
 | RTX 2050 Laptop (4 GB) merge gate | Pending maintainer comparison per the [release checklist](RELEASE_CHECKLIST.md#rtx-2050-low-memory-merge-gate). |
 | RTX 2080 Ti, RTX 5060 Laptop | Optional follow-up. |
 
