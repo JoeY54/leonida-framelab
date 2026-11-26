@@ -9,6 +9,7 @@
 #include <mutex>
 #include <new>
 #include <string>
+#include <type_traits>
 
 using Microsoft::WRL::ComPtr;
 
@@ -35,9 +36,13 @@ struct Registry {
 };
 
 // Intentionally never destroyed: a leaked handle must not run Shutdown1 during static teardown.
-Registry& registry()
+// Static storage removes the heap allocation from registry initialization, including the
+// noexcept exclusive-claim path. The empty Registry must be constructible without throwing.
+Registry& registry() noexcept
 {
-    static Registry* instance = new Registry;
+    static_assert(std::is_nothrow_default_constructible_v<Registry>);
+    alignas(Registry) static unsigned char storage[sizeof(Registry)];
+    static Registry* const instance = ::new (static_cast<void*>(storage)) Registry;
     return *instance;
 }
 
