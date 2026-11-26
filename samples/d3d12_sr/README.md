@@ -23,7 +23,7 @@ A single mode can be launched directly:
 
 | Mode | What it checks |
 | --- | --- |
-| default | 1280×720 Quality, resize to 960×540 Balanced, resize to 1280×720 Performance, then a fresh NGX session in the same process. Covers readback, camera cut and reset, missing-input rejection with ordinary fallback and recovery, dynamic resolution where the runtime reports a range, cancellation of unsubmitted work, fence-gated retention and clean destruction. |
+| default | 1280×720 Quality, resize to 960×540 Balanced, resize to 1280×720 Performance, then a fresh NGX session in the same process. Covers readback, camera cut and reset, missing-input rejection with ordinary fallback and recovery, dynamic resolution where the runtime reports a range, cancellation of unsubmitted work followed by reconfiguration, fence-gated retention and clean destruction. |
 | `--validation` | Same sequence with the D3D12 debug layer. Errors and warnings are printed and fail the run. |
 | `--gpu-validation` | Same sequence with GPU-based validation as well. |
 | `--timing <frames>` | 1280×720 Quality with fixed inputs, no debug layer and no readback. GPU timestamps around each evaluation, CPU frame intervals and local VRAM usage and budget. |

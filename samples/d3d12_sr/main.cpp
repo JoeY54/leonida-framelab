@@ -554,7 +554,7 @@ private:
         sdk(result, step);
     }
 
-    void configure(FrameLabD3D12Sr* sr, FrameLabExtent output, uint32_t mode, bool contract)
+    void configure(FrameLabD3D12Sr* sr, FrameLabExtent output, uint32_t mode, bool contract, bool reallocate = true)
     {
         const FrameLabD3D12SrOptions options{sizeof options, FRAMELAB_ABI_VERSION, output, mode, 0};
         FrameLabD3D12SrSettings settings{};
@@ -585,7 +585,7 @@ private:
         resizes_ += resize;
         stage_ = {output, settings.optimal_render_extent, settings.optimal_render_extent, mode};
         minRender_ = settings.min_render_extent;
-        allocate();
+        if (reallocate) allocate();
     }
 
     FrameLabExtent minRender_{};
@@ -757,7 +757,8 @@ private:
         scene_.left += speed;
     }
 
-    // Recorded but never executed work is cancelled. FrameLab releases its references at once.
+    // Recorded but never executed work is cancelled. FrameLab releases its references at once and
+    // drops the NGX feature, whose internal state tracking assumed the discarded list would run.
     void cancelUnsubmitted(FrameLabD3D12Sr* sr)
     {
         // The discarded list never executes, so its recorded transitions never happen.
@@ -777,6 +778,9 @@ private:
         motion_.state = saved[2];
         output_.state = saved[3];
         cancelVerified_ = releases_ == before; // the host still holds its leases
+        auto next = describe(0);
+        expectStatus(framelab_d3d12_sr_record(sr, &next), FRAMELAB_INVALID_PHASE, "record_after_cancel_needs_configure");
+        configure(sr, stage_.output, stage_.mode, false, false);
         // The discarded upload work never ran, so the next frame re-records the same source frame.
     }
 

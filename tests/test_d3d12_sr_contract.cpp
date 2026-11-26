@@ -287,25 +287,36 @@ int main()
     CHECK(life.retire(8, false, work) == FRAMELAB_OK);
     CHECK(!life.resetFor(2, 0));
 
-    // Cancelled or failed recordings, and explicit invalidation, reset the next frame.
+    // A cancelled evaluation reached NGX: the feature must be configured again, and history resets.
     life.evaluateRecorded(true, 2);
     CHECK(life.cancel(work) == FRAMELAB_OK && work == Work::evaluate);
-    CHECK(life.lastFrame() == 1 && life.resetFor(2, 0));
-    CHECK(life.ready());
-    life.evaluateRecorded(true, 2);
+    CHECK(life.lastFrame() == 1 && !life.ready());
+    CHECK(life.beginRecord() == FRAMELAB_INVALID_PHASE);
+    CHECK(life.beginConfigure() == FRAMELAB_OK);
+    life.configureRecorded(true, config);
     CHECK(life.markSubmitted(9) == FRAMELAB_OK);
-    CHECK(life.retire(9, false, work) == FRAMELAB_OK);
-    CHECK(!life.resetFor(3, 0));
-    life.evaluateRecorded(false, 3);
-    CHECK(life.markSubmitted(10) == FRAMELAB_INVALID_PHASE);
-    CHECK(life.beginRecord() == FRAMELAB_BUSY);
-    CHECK(life.cancel(work) == FRAMELAB_OK && work == Work::evaluate);
-    CHECK(life.resetFor(3, 0));
-    life.evaluateRecorded(true, 3);
+    CHECK(life.retire(9, false, work) == FRAMELAB_OK && life.ready());
+    CHECK(life.resetFor(2, 0));
+    life.evaluateRecorded(true, 2);
     CHECK(life.markSubmitted(10) == FRAMELAB_OK);
     CHECK(life.retire(10, false, work) == FRAMELAB_OK);
+    CHECK(!life.resetFor(3, 0));
+    // A failed native recording is cancelled the same way.
+    life.evaluateRecorded(false, 3);
+    CHECK(life.markSubmitted(11) == FRAMELAB_INVALID_PHASE);
+    CHECK(life.beginRecord() == FRAMELAB_BUSY);
+    CHECK(life.cancel(work) == FRAMELAB_OK && work == Work::evaluate);
+    CHECK(!life.ready() && life.beginRecord() == FRAMELAB_INVALID_PHASE);
+    life.configureRecorded(true, config);
+    CHECK(life.markSubmitted(11) == FRAMELAB_OK);
+    CHECK(life.retire(11, false, work) == FRAMELAB_OK && life.ready());
+    CHECK(life.resetFor(3, 0));
+    life.evaluateRecorded(true, 3);
+    CHECK(life.markSubmitted(12) == FRAMELAB_OK);
+    CHECK(life.retire(12, false, work) == FRAMELAB_OK);
+    // Explicit invalidation resets history without reconfiguration.
     CHECK(life.invalidate() == FRAMELAB_OK);
-    CHECK(life.resetFor(4, 0));
+    CHECK(life.ready() && life.resetFor(4, 0));
 
     // Resize: reconfiguration resets history and blocks frames until its creation retires.
     auto resized = config;
@@ -313,9 +324,9 @@ int main()
     CHECK(life.beginConfigure() == FRAMELAB_OK);
     life.configureRecorded(true, resized);
     CHECK(!life.ready() && life.configuration().options.output.width == 960);
-    CHECK(life.markSubmitted(11) == FRAMELAB_OK);
+    CHECK(life.markSubmitted(15) == FRAMELAB_OK);
     CHECK(life.beginRecord() == FRAMELAB_BUSY);
-    CHECK(life.retire(11, false, work) == FRAMELAB_OK && work == Work::configure);
+    CHECK(life.retire(15, false, work) == FRAMELAB_OK && work == Work::configure);
     CHECK(life.beginRecord() == FRAMELAB_OK && life.resetFor(4, 0));
     CHECK(life.lastFrame() == 3); // frame indices stay monotonic across reconfiguration
 
@@ -325,12 +336,12 @@ int main()
     CHECK(life.cancel(work) == FRAMELAB_OK && work == Work::configure);
     CHECK(!life.ready() && life.beginRecord() == FRAMELAB_INVALID_PHASE);
     life.configureRecorded(true, config);
-    CHECK(life.markSubmitted(12) == FRAMELAB_OK);
-    CHECK(life.retire(12, false, work) == FRAMELAB_OK && life.ready());
+    CHECK(life.markSubmitted(16) == FRAMELAB_OK);
+    CHECK(life.retire(16, false, work) == FRAMELAB_OK && life.ready());
 
     // UINT64_MAX is reserved: without removal it keeps references, with removal it releases them.
     life.evaluateRecorded(true, 4);
-    CHECK(life.markSubmitted(13) == FRAMELAB_OK);
+    CHECK(life.markSubmitted(17) == FRAMELAB_OK);
     CHECK(life.retire(UINT64_MAX, false, work) == FRAMELAB_INVALID_SYNC && work == Work::none);
     CHECK(life.phase() == Phase::submitted);
     CHECK(life.retire(UINT64_MAX, true, work) == FRAMELAB_DEVICE_LOST && work == Work::evaluate);
@@ -338,7 +349,7 @@ int main()
     CHECK(life.beginRecord() == FRAMELAB_DEVICE_LOST);
     CHECK(life.beginConfigure() == FRAMELAB_DEVICE_LOST);
     CHECK(life.invalidate() == FRAMELAB_DEVICE_LOST);
-    CHECK(life.markSubmitted(14) == FRAMELAB_DEVICE_LOST);
+    CHECK(life.markSubmitted(18) == FRAMELAB_DEVICE_LOST);
 
     // Device loss during configuration never marks the feature ready.
     Lifecycle lost(0);

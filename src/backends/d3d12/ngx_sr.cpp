@@ -365,8 +365,10 @@ FrameLabStatus FRAMELAB_CALL framelab_d3d12_sr_cancel(FrameLabD3D12Sr* sr)
     if (!sr) return FRAMELAB_INVALID_ARGUMENT;
     sr::Work cancelled{};
     if (const auto status = sr->lifecycle.cancel(cancelled); status != FRAMELAB_OK) return status;
-    // A never-submitted creation is not in flight, so its handle can be released now.
-    if (cancelled == sr::Work::configure) sr->releaseFeature();
+    // The discarded list never executes and the previous evaluation already retired, so the feature
+    // is not in flight. NGX tracked the discarded recording's internal resource states, so the
+    // feature cannot be reused. The host configures a fresh one.
+    sr->releaseFeature();
     sr->dropPending();
     return FRAMELAB_OK;
 }

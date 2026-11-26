@@ -293,11 +293,15 @@ public:
         return FRAMELAB_OK;
     }
 
+    // Every cancellable packet reached NGX, which updates the feature's internal resource-state
+    // tracking while it records. Discarded work leaves that tracking ahead of the GPU, so the
+    // adapter releases the feature and the host configures again before the next frame.
     FrameLabStatus cancel(Work& cancelled)
     {
         cancelled = Work::none;
         if (phase_ != Phase::recorded && phase_ != Phase::record_failed) return FRAMELAB_INVALID_PHASE;
         cancelled = work_;
+        ready_ = false;
         needReset_ = true;
         work_ = Work::none;
         phase_ = Phase::idle;

@@ -95,7 +95,8 @@ FRAMELAB_API FrameLabStatus FRAMELAB_CALL framelab_d3d12_sr_record(
 /* Acknowledge only after executing the recorded list and queuing Signal(value) on the queue. */
 FRAMELAB_API FrameLabStatus FRAMELAB_CALL framelab_d3d12_sr_mark_submitted(
     FrameLabD3D12Sr* sr, uint64_t value);
-/* Cancel only after ensuring the recorded work can never execute. */
+/* Cancel only after ensuring the recorded work can never execute. Cancellation releases the native
+ * feature, because NGX tracks its internal resource states while recording: configure again. */
 FRAMELAB_API FrameLabStatus FRAMELAB_CALL framelab_d3d12_sr_cancel(FrameLabD3D12Sr* sr);
 /* Reads the actual completion fence. FRAMELAB_NOT_READY keeps every reference. */
 FRAMELAB_API FrameLabStatus FRAMELAB_CALL framelab_d3d12_sr_retire(FrameLabD3D12Sr* sr);
