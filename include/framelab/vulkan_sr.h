@@ -13,7 +13,11 @@ extern "C" {
 typedef struct FrameLabVulkanSr FrameLabVulkanSr;
 typedef void (FRAMELAB_CALL *FrameLabVulkanSrReportFn)(void*, const char*, int32_t);
 
+/* Shared with <framelab/d3d12_sr.h>. */
+#ifndef FRAMELAB_SR_MODES_DEFINED
+#define FRAMELAB_SR_MODES_DEFINED
 enum { FRAMELAB_SR_PERFORMANCE = 1, FRAMELAB_SR_BALANCED = 2, FRAMELAB_SR_QUALITY = 3 };
+#endif
 
 typedef struct FrameLabVulkanSrConfig {
     uint32_t struct_size, abi_version;

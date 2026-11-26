@@ -4,12 +4,12 @@
 #include <framelab/d3d12_fg.h>
 
 #include "frame_bindings.hpp"
+#include "ngx_session.hpp"
 #include "../../core/fg_stream_internal.hpp"
 
 #include <nvsdk_ngx.h>
 #include <nvsdk_ngx_helpers_dlssg_d3d.h>
 
-#include <atomic>
 #include <cstring>
 #include <memory>
 #include <new>
@@ -19,7 +19,6 @@ namespace fi = frame_inputs;
 namespace d3d = framelab::d3d12;
 
 namespace {
-std::atomic_flag activeBackend;
 enum class Work { none, initialize, evaluate };
 enum class Phase { idle, recorded, record_failed, submitted };
 
@@ -86,7 +85,7 @@ struct FrameLabD3D12Fg {
         if (parameters) NVSDK_NGX_D3D12_DestroyParameters(parameters);
         if (initialized) NVSDK_NGX_D3D12_Shutdown1(device.Get());
         framelab_fg_stream_destroy(stream);
-        activeBackend.clear();
+        framelab::d3d12::ngx::releaseExclusive();
     }
 
     bool directList(ID3D12GraphicsCommandList* list) const
@@ -122,10 +121,11 @@ FrameLabStatus FRAMELAB_CALL framelab_d3d12_fg_create(const FrameLabD3D12FgConfi
         return FRAMELAB_INVALID_RESOURCE_STATE;
     const auto completed = c.completion_fence->GetCompletedValue();
     if (completed == UINT64_MAX) return FRAMELAB_DEVICE_LOST;
-    if (activeBackend.test_and_set()) return FRAMELAB_BUSY;
+    // FG initializes and shuts down NGX itself, so it cannot share a live D3D12 SR session.
+    if (!framelab::d3d12::ngx::claimExclusive()) return FRAMELAB_BUSY;
     std::unique_ptr<FrameLabD3D12Fg> fg(new (std::nothrow) FrameLabD3D12Fg);
     if (!fg) {
-        activeBackend.clear();
+        framelab::d3d12::ngx::releaseExclusive();
         return FRAMELAB_OUT_OF_MEMORY;
     }
     fg->device = c.device;
