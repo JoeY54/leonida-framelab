@@ -26,6 +26,11 @@ typedef struct FrameLabD3D12FgConfig {
     const wchar_t* log_directory;
     FrameLabD3D12InitReportFn report; /* Optional, called synchronously during create. */
     void* report_user;
+    /* Appended after v0.4.0. Callers built against the shorter layout are accepted, and a zero
+     * extent selects `extent`. Depth and motion vectors use this extent, which must not exceed
+     * `extent`; color and the generated image use `extent`. With D3D12 SR, pass the SR render
+     * extent and the SR output as color. */
+    FrameLabExtent render_extent;
 } FrameLabD3D12FgConfig;
 
 typedef struct FrameLabD3D12FgImage {
@@ -41,8 +46,10 @@ typedef struct FrameLabD3D12FgBindings {
     FrameLabD3D12FgImage color, depth, motion_vectors, generated;
 } FrameLabD3D12FgBindings;
 
-/* Queries native NGX capability. The host provides live COM interfaces and an
- * increasing completion timeline signaled by this direct queue. */
+/* Joins or initializes the process NGX D3D12 session shared with D3D12 SR handles, then queries
+ * native FG capability. Joining needs the same device and identical project, engine and directory
+ * arguments; otherwise FRAMELAB_BUSY. The last FG or SR handle shuts NGX down. The host provides
+ * live COM interfaces and an increasing completion timeline signaled by this direct queue. */
 FRAMELAB_API FrameLabStatus FRAMELAB_CALL framelab_d3d12_fg_create(
     const FrameLabD3D12FgConfig* config, FrameLabD3D12Fg** out_fg);
 FRAMELAB_API FrameLabStatus FRAMELAB_CALL framelab_d3d12_fg_destroy(FrameLabD3D12Fg* fg);

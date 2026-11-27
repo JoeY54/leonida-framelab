@@ -40,12 +40,7 @@ private:
 
 // Initializes NGX for the device or joins the live session. Joining requires the same device and
 // identical initialization arguments. `initialized` reports whether this call ran NGX Init.
-// FRAMELAB_BUSY: an exclusive owner holds NGX, or the live session differs.
+// D3D12 SR and D3D12 FG handles both hold references. FRAMELAB_BUSY: the live session differs.
 FrameLabStatus acquire(const InitDesc& desc, SessionRef& out, uint32_t& ngxResult, bool& initialized);
-
-// For a component that calls NGX Init/Shutdown1 itself (the current D3D12 FG module). It fails
-// while any shared session or another exclusive owner is live.
-bool claimExclusive() noexcept;
-void releaseExclusive() noexcept;
 
 } // namespace framelab::d3d12::ngx

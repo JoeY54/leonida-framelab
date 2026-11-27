@@ -41,7 +41,9 @@ inline bool texture(const ImageBinding& binding, ID3D12Device& device, DXGI_FORM
         desc.SampleDesc.Count == 1 && desc.Format == format;
 }
 
-// The initial native profile is the tested synthetic D3D12 NGX input layout.
+// The native profile: output-size RGBA8 color (for example a D3D12 SR output), depth and
+// unjittered motion at a render extent no larger than the output, and a zero-jitter camera.
+// Core validation already ties color to the output extent and depth/motion to the render extent.
 // This check does not perform a resource barrier or a GPU wait.
 inline fi::Result check(const fi::FrameInputs& frame, const RecordContext& context,
                        const ImageBinding& color, const ImageBinding& depth,
@@ -56,7 +58,8 @@ inline fi::Result check(const fi::FrameInputs& frame, const RecordContext& conte
         context.queue.GetDesc().Type != D3D12_COMMAND_LIST_TYPE_DIRECT ||
         context.commands.GetType() != D3D12_COMMAND_LIST_TYPE_DIRECT)
         return {fi::Error::binding, "D3D12 command list or queue does not match the device"};
-    if (frame.renderExtent != frame.outputExtent || frame.hudless || frame.ui ||
+    if (frame.renderExtent.width > frame.outputExtent.width ||
+        frame.renderExtent.height > frame.outputExtent.height || frame.hudless || frame.ui ||
         frame.color.format != fi::Format::rgba8_unorm || frame.depth.format != fi::Format::r32_float ||
         frame.motionVectors.format != fi::Format::rg16_float ||
         frame.camera.projectionSpace != fi::ClipSpace::y_up_zero_to_one ||

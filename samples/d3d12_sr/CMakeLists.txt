@@ -6,7 +6,7 @@ add_executable(d3d12_sr main.cpp)
 target_compile_features(d3d12_sr PRIVATE cxx_std_20)
 target_link_libraries(d3d12_sr PRIVATE FrameLab::FrameLab d3d12 dxgi)
 if(FrameLab_D3D12FG_FOUND)
-  # Also checks that D3D12 FG refuses to start while an SR session owns NGX.
+  # Also checks that D3D12 FG joins a live SR session and refuses different session arguments.
   target_compile_definitions(d3d12_sr PRIVATE FRAMELAB_SAMPLE_D3D12_FG=1)
 endif()
 

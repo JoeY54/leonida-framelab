@@ -10,6 +10,8 @@
 #include <nvsdk_ngx.h>
 #include <nvsdk_ngx_helpers_dlssg_d3d.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <memory>
 #include <new>
@@ -17,6 +19,7 @@
 using Microsoft::WRL::ComPtr;
 namespace fi = frame_inputs;
 namespace d3d = framelab::d3d12;
+namespace session = framelab::d3d12::ngx;
 
 namespace {
 enum class Work { none, initialize, evaluate };
@@ -67,25 +70,25 @@ struct FrameLabD3D12Fg {
     ComPtr<ID3D12GraphicsCommandList> commands;
     std::array<ComPtr<ID3D12Resource>, 4> resources;
     fi::Id deviceId{}, queueId{};
-    FrameLabExtent extent{};
+    FrameLabExtent extent{}, renderExtent{};
     uint64_t submittedValue{};
+    session::SessionRef ngx;
     FrameLabFgStream* stream{};
     NVSDK_NGX_Parameter* parameters{};
     NVSDK_NGX_Handle* feature{};
     NVSDK_NGX_Result lastResult{};
     Work work = Work::none;
     Phase phase = Phase::idle;
-    bool initialized = false;
     bool ready = false;
     bool lost = false;
 
     ~FrameLabD3D12Fg()
     {
+        // The feature and parameter map go before the session reference, which may run Shutdown1.
         if (feature) NVSDK_NGX_D3D12_ReleaseFeature(feature);
         if (parameters) NVSDK_NGX_D3D12_DestroyParameters(parameters);
-        if (initialized) NVSDK_NGX_D3D12_Shutdown1(device.Get());
         framelab_fg_stream_destroy(stream);
-        framelab::d3d12::ngx::releaseExclusive();
+        ngx.reset();
     }
 
     bool directList(ID3D12GraphicsCommandList* list) const
@@ -108,48 +111,52 @@ FrameLabStatus FRAMELAB_CALL framelab_d3d12_fg_create(const FrameLabD3D12FgConfi
     if (!out) return FRAMELAB_INVALID_ARGUMENT;
     *out = nullptr;
     if (!config) return FRAMELAB_INVALID_ARGUMENT;
-    if (config->struct_size < sizeof *config || config->abi_version != FRAMELAB_ABI_VERSION)
+    // Callers built before render_extent was appended pass the shorter v1 layout.
+    constexpr auto v1Size = offsetof(FrameLabD3D12FgConfig, render_extent);
+    if (config->struct_size < v1Size || config->abi_version != FRAMELAB_ABI_VERSION)
         return FRAMELAB_ABI_MISMATCH;
-    const auto& c = *config;
+    FrameLabD3D12FgConfig c{};
+    std::memcpy(&c, config, std::min<size_t>(config->struct_size, sizeof c));
+    if (!c.render_extent.width && !c.render_extent.height) c.render_extent = c.extent;
     if (!c.device || !c.queue || !c.completion_fence || !c.device_id || !c.queue_id ||
         !c.extent.width || !c.extent.height || !c.project_id || !*c.project_id ||
         !c.engine_version || !c.ngx_runtime_directory || !*c.ngx_runtime_directory ||
         !c.log_directory || !*c.log_directory)
         return FRAMELAB_INVALID_ARGUMENT;
+    if (!c.render_extent.width || !c.render_extent.height || c.render_extent.width > c.extent.width ||
+        c.render_extent.height > c.extent.height)
+        return FRAMELAB_INVALID_DIMENSIONS;
     if (c.queue->GetDesc().Type != D3D12_COMMAND_LIST_TYPE_DIRECT ||
         !d3d::onDevice(*c.queue, *c.device) || !d3d::onDevice(*c.completion_fence, *c.device))
         return FRAMELAB_INVALID_RESOURCE_STATE;
     const auto completed = c.completion_fence->GetCompletedValue();
     if (completed == UINT64_MAX) return FRAMELAB_DEVICE_LOST;
-    // FG initializes and shuts down NGX itself, so it cannot share a live D3D12 SR session.
-    if (!framelab::d3d12::ngx::claimExclusive()) return FRAMELAB_BUSY;
     std::unique_ptr<FrameLabD3D12Fg> fg(new (std::nothrow) FrameLabD3D12Fg);
-    if (!fg) {
-        framelab::d3d12::ngx::releaseExclusive();
-        return FRAMELAB_OUT_OF_MEMORY;
-    }
+    if (!fg) return FRAMELAB_OUT_OF_MEMORY;
     fg->device = c.device;
     fg->queue = c.queue;
     fg->fence = c.completion_fence;
     fg->deviceId = c.device_id;
     fg->queueId = c.queue_id;
     fg->extent = c.extent;
+    fg->renderExtent = c.render_extent;
     fg->submittedValue = completed;
     const auto stream = framelab_fg_stream_create(FRAMELAB_ABI_VERSION, &fg->stream);
     if (stream != FRAMELAB_OK) return stream;
     const auto report = [&](const char* operation) {
         if (c.report) c.report(c.report_user, operation, static_cast<uint32_t>(fg->lastResult));
     };
-    const wchar_t* paths[] = {c.ngx_runtime_directory};
-    NVSDK_NGX_FeatureCommonInfo info{};
-    info.PathListInfo.Path = paths;
-    info.PathListInfo.Length = 1;
-    fg->lastResult = NVSDK_NGX_D3D12_Init_with_ProjectID(
-        c.project_id, NVSDK_NGX_ENGINE_TYPE_CUSTOM, c.engine_version, c.log_directory,
-        c.device, &info, NVSDK_NGX_Version_API);
-    report("NGX_D3D12_Init");
-    if (NVSDK_NGX_FAILED(fg->lastResult)) return FRAMELAB_NATIVE_FAILURE;
-    fg->initialized = true;
+    // FG joins the process NGX D3D12 session that D3D12 SR handles share, or initializes it. Joining
+    // needs the same device and identical arguments; another configuration gets FRAMELAB_BUSY.
+    uint32_t init = 0;
+    bool initialized = false;
+    const auto joined = session::acquire({c.device, c.project_id, c.engine_version, c.ngx_runtime_directory,
+                                          c.log_directory}, fg->ngx, init, initialized);
+    fg->lastResult = static_cast<NVSDK_NGX_Result>(init);
+    if (initialized) report("NGX_D3D12_Init");
+    else if (joined == FRAMELAB_OK) report("NGX_D3D12_Session_Join");
+    // An NGX Init failure keeps the v1 result. Busy, argument and allocation failures pass through.
+    if (joined != FRAMELAB_OK) return initialized ? FRAMELAB_NATIVE_FAILURE : joined;
     NVSDK_NGX_Parameter* caps{};
     fg->lastResult = NVSDK_NGX_D3D12_GetCapabilityParameters(&caps);
     report("NGX_D3D12_GetCapabilityParameters");
@@ -185,8 +192,10 @@ FrameLabStatus FRAMELAB_CALL framelab_d3d12_fg_record_initialize(
     if (fg->ready) return FRAMELAB_INVALID_PHASE;
     if (!fg->directList(commands)) return FRAMELAB_INVALID_RESOURCE_STATE;
     NVSDK_NGX_DLSSG_Create_Params info{};
-    info.Width = info.RenderWidth = fg->extent.width;
-    info.Height = info.RenderHeight = fg->extent.height;
+    info.Width = fg->extent.width;
+    info.Height = fg->extent.height;
+    info.RenderWidth = fg->renderExtent.width;
+    info.RenderHeight = fg->renderExtent.height;
     info.NativeBackbufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
     fg->parameters->Set("DLSSG.SynchronousInit", 1u);
     fg->parameters->Set("DLSSG.EnableInterp", 1u);
@@ -216,7 +225,8 @@ FrameLabStatus FRAMELAB_CALL framelab_d3d12_fg_record(
         framelab_fg_cancel(fg->stream);
         return status;
     };
-    if (input.outputExtent != fi::Extent{fg->extent.width, fg->extent.height})
+    if (input.outputExtent != fi::Extent{fg->extent.width, fg->extent.height} ||
+        input.renderExtent != fi::Extent{fg->renderExtent.width, fg->renderExtent.height})
         return reject(FRAMELAB_INVALID_DIMENSIONS);
     if (input.frameIndex == UINT64_MAX) return reject(FRAMELAB_INVALID_SEQUENCE);
     const auto color = borrow(bindings->color, input.color);
@@ -248,6 +258,8 @@ FrameLabStatus FRAMELAB_CALL framelab_d3d12_fg_record(
     fg->parameters->Set("DLSSG.EnableInterp", 1u);
     fg->parameters->Set("DLSSG.IsRecording", 0u);
     fg->parameters->Set("DLSSG.FlushRequired", 0u);
+    // The profile requires unjittered motion vectors and a zero-jitter camera (frame_bindings.hpp).
+    fg->parameters->Set(NVSDK_NGX_DLSSG_Parameter_MvecJittered, 0u);
     fg->lastResult = NGX_D3D12_EVALUATE_DLSSG(bindings->commands, fg->feature, fg->parameters, &args, &options);
     const bool success = NVSDK_NGX_SUCCEED(fg->lastResult);
     fg->phase = success ? Phase::recorded : Phase::record_failed;

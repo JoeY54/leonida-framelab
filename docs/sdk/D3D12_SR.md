@@ -80,7 +80,7 @@ The host signals `completion_fence` on the configured queue after executing each
 | `FRAMELAB_ABI_MISMATCH` | Short `struct_size` or another `abi_version` in any descriptor. |
 | `FRAMELAB_INVALID_ARGUMENT` | Null handle, descriptor or command list, unknown option or reset bits, or invalid exposure values. |
 | `FRAMELAB_INVALID_PHASE` | Record before a configuration has retired, or a lifecycle call in the wrong phase. |
-| `FRAMELAB_BUSY` | A packet is pending, or the NGX session belongs to another configuration or to D3D12 FG. |
+| `FRAMELAB_BUSY` | A packet is pending, or the NGX session belongs to another configuration. |
 | `FRAMELAB_INVALID_IDENTITY` | A queue, fence, list or resource on another device, a zero or repeated resource ID, or aliased resources. |
 | `FRAMELAB_INVALID_SYNC` | A non-direct queue or list, a zero command stream ID, or a non-increasing fence value. |
 | `FRAMELAB_INVALID_SEQUENCE` | A frame index at or below the last acknowledged frame. |
@@ -100,7 +100,17 @@ When the device is removed after an acknowledged submission, the fence reports `
 
 NGX is initialized once per device, and `NVSDK_NGX_D3D12_Shutdown1` releases every feature on that device. FrameLab therefore keeps one process-wide, reference-counted NGX D3D12 session. The first SR handle calls `NVSDK_NGX_D3D12_Init_with_ProjectID`. Later handles on the same device with identical project ID, engine version and directories join it. Other configurations get `FRAMELAB_BUSY`. Each handle releases its feature and parameter map before its session reference. The last reference calls `Shutdown1`, then releases the session's device reference. A new handle after that initializes NGX again.
 
-The current [D3D12 FG module](D3D12_FG.md) calls Init and Shutdown1 itself. It now claims the same process-wide slot exclusively. `framelab_d3d12_fg_create` returns `FRAMELAB_BUSY` while any SR handle is alive, and SR create returns `FRAMELAB_BUSY` while FG is alive. FG on its own behaves as before. This prevents either module from shutting NGX down under the other. Concurrent SR and FG is the scope of [FL-16](https://github.com/5headsmartbtw/leonida-framelab/issues/31). The planned change moves FG onto the shared session with identical initialization arguments. Both features then live on one session, and Shutdown1 runs after both have released their features and parameter maps.
+Since [FL-16](https://github.com/5headsmartbtw/leonida-framelab/issues/31), [D3D12 FG](D3D12_FG.md) handles hold references to the same session. FG with identical arguments joins a live SR session and the reverse, in either creation order. Each handle releases its feature and parameter map before its reference, so destroying either one leaves the other working, and Shutdown1 runs after the last one. Before FL-16, FG called Init and Shutdown1 itself and claimed the session exclusively, so SR and FG returned `FRAMELAB_BUSY` for each other.
+
+## SR to FG chaining
+
+FL-16 uses actual DLSS SR output as FG color. The tested contract, exercised by [samples/d3d12_sr_fg](../../samples/d3d12_sr_fg):
+
+- **Extents and formats.** Create FG with `extent` = SR output extent and `render_extent` = the SR render extent from `framelab_d3d12_sr_query_settings`. FG color is the RGBA8 SR output. Depth (R32_FLOAT) and motion (RG16_FLOAT) are the same render-size textures SR read. Per-frame dynamic resolution is not part of the FG profile. HDR (RGBA16F) SR output is not accepted by FG: DLSS-G expects an LDR or HDR10 backbuffer format.
+- **Conventions.** One Y-up, zero-to-one clip space, previous-minus-current normalized UV motion, and the same depth convention for both. SR may receive sub-pixel jitter; FG currently needs unjittered motion vectors and a zero-jitter camera, so the sample uses zero jitter throughout.
+- **Ordering.** Record SR, then a UAV barrier and a UAV → non-pixel shader resource transition of the SR output, then FG, on one open direct list. Execute it, signal the completion fence once, and acknowledge the same value on both handles. Retire both after that value completes. Before the next frame, transition the SR output back to UAV.
+- **Lifetime.** Pass the same lease for the SR output to SR (as `output`) and to FG (as `color`). SR releases its references when it retires; FG keeps the SR output, depth and motion until it retires, after its final read.
+- **Resets.** Pass the same reset bits to both. After an SR rejection or other ordinary-rendering fallback, invalidate FG and reset both on the next frame.
 
 ## Memory
 
@@ -112,7 +122,7 @@ The [v0.4.0 reference run](RELEASE_NOTES.md) at `73f9daed9d4e1e7d3a1ccc968bdd985
 
 Portable checks run in CI on Linux and Windows without NVIDIA downloads. `d3d12_sr_contract` exercises the decision layer in [sr_contract.hpp](../../src/backends/d3d12/sr_contract.hpp): option and range checks, every descriptor rejection, reset rules, monotonic fences, `NOT_READY` retention, cancellation, reconfiguration and simulated device removal. On Windows, `d3d12_sr_header_c` and `d3d12_sr_header_cpp` compile the public header as C and C++ with the D3D12 FG header and check the x64 layout. The native adapter `static_assert`s every numeric constant the decision layer uses against the Windows SDK, NGX and public headers. The native module needs the DLSS SDK and is not built in hosted CI.
 
-The [external consumer](../../samples/d3d12_sr) and [`tests/run_d3d12_sr_checks.ps1`](../../tests/run_d3d12_sr_checks.ps1) run the hardware checks in separate processes. Covered are standard and D3D12 debug-layer correctness runs, GPU-based validation, timing without validation or readback, and native device removal. The checks include verified readback of a known synthetic scene that detects clear-only and stale output, three output configurations with two resizes, a camera cut, missing-input rejection with fallback and recovery, dynamic resolution where the runtime reports a range, cancellation, fence-gated retention, a joined session handle, two fully configured handles on one session, rejection of FG while SR is alive and NGX re-initialization.
+The [external consumer](../../samples/d3d12_sr) and [`tests/run_d3d12_sr_checks.ps1`](../../tests/run_d3d12_sr_checks.ps1) run the hardware checks in separate processes. Covered are standard and D3D12 debug-layer correctness runs, GPU-based validation, timing without validation or readback, and native device removal. The checks include verified readback of a known synthetic scene that detects clear-only and stale output, three output configurations with two resizes, a camera cut, missing-input rejection with fallback and recovery, dynamic resolution where the runtime reports a range, cancellation, fence-gated retention, a joined session handle, two fully configured handles on one session, a D3D12 FG handle joining the live SR session (and FG with different arguments refused) and NGX re-initialization. Chained SR and FG run in [samples/d3d12_sr_fg](../../samples/d3d12_sr_fg) with [`tests/run_d3d12_sr_fg_checks.ps1`](../../tests/run_d3d12_sr_fg_checks.ps1).
 
 ### RTX 5090 with the official runtime
 
@@ -143,4 +153,4 @@ On the same install and machine, the existing [D3D12 FG consumer](../../samples/
 | RTX 2050 Laptop (4 GB) merge gate | Passed. The maintainer tested `cc77061` (tree of `b0bf7c3`) with driver 617.14, MSVC 19.44 and the official 310.9.1 runtime. Results: 20/20 SR evaluations, 37/37 lifecycle checks, debug layer and GPU-based validation 0/0, SR GPU p50 1.490 ms and p95 1.588 ms, steady VRAM 92.5 MiB against a 3,368 MiB budget, and D3D12 FG readbacks unchanged with no FG regression ([#36](https://github.com/5headsmartbtw/leonida-framelab/pull/36#issuecomment-7197345649)). This run predates the registry change and the upstream merge. |
 | RTX 2080 Ti, RTX 5060 Laptop | Optional follow-up. |
 
-Not covered by the sample: sub-pixel jitter, HDR and exposure, depth-stencil formats, presentation, allocation failure injection, concurrent SR and FG, and image quality.
+Not covered by the sample: sub-pixel jitter, HDR and exposure, depth-stencil formats, presentation, allocation failure injection and image quality. Concurrent SR and FG is covered by the FL-16 consumer.

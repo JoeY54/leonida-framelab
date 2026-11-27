@@ -886,10 +886,18 @@ private:
         static const std::wstring runtime = args_.runtime.wstring();
         const FrameLabD3D12FgConfig fg{sizeof fg, FRAMELAB_ABI_VERSION, 1, 1, gpu_.device.Get(), gpu_.queue.Get(),
             gpu_.fence.Get(), {1280, 720}, projectId, "framelab-d3d12-sr-0.4", runtime.c_str(), logs.c_str(), nullptr, nullptr};
+        // FL-16: FG joins the live SR session with identical arguments. Destroying it must not shut NGX
+        // down under SR, which the following SR frames verify. Different arguments are still refused.
         FrameLabD3D12Fg* fgHandle{};
-        expectStatus(framelab_d3d12_fg_create(&fg, &fgHandle), FRAMELAB_BUSY, "d3d12_fg_while_sr_session_live");
+        expectStatus(framelab_d3d12_fg_create(&fg, &fgHandle), FRAMELAB_OK, "d3d12_fg_joins_sr_session");
+        expectStatus(framelab_d3d12_fg_destroy(fgHandle), FRAMELAB_OK, "destroy_joined_d3d12_fg");
+        static const std::wstring otherLogs = (args_.output / L"ngx-other").wstring();
+        auto otherFg = fg;
+        otherFg.log_directory = otherLogs.c_str();
+        fgHandle = nullptr;
+        expectStatus(framelab_d3d12_fg_create(&otherFg, &fgHandle), FRAMELAB_BUSY, "d3d12_fg_different_session_arguments");
 #else
-        std::puts("ABI_CHECK d3d12_fg_while_sr_session_live=SKIPPED reason=D3D12FG_not_installed");
+        std::puts("ABI_CHECK d3d12_fg_joins_sr_session=SKIPPED reason=D3D12FG_not_installed");
 #endif
         sharedVerified_ = true;
     }

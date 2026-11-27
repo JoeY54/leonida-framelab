@@ -17,7 +17,6 @@ namespace framelab::d3d12::ngx {
 namespace {
 struct Registry {
     std::mutex mutex;
-    bool exclusive = false;
     unsigned references = 0;
     ComPtr<ID3D12Device> device;
     ComPtr<IUnknown> identity;
@@ -36,8 +35,8 @@ struct Registry {
 };
 
 // Intentionally never destroyed: a leaked handle must not run Shutdown1 during static teardown.
-// Static storage removes the heap allocation from registry initialization, including the
-// noexcept exclusive-claim path. The empty Registry must be constructible without throwing.
+// Static storage keeps registry initialization free of heap allocation, so the noexcept
+// SessionRef::reset path cannot fail. The empty Registry must be constructible without throwing.
 Registry& registry() noexcept
 {
     static_assert(std::is_nothrow_default_constructible_v<Registry>);
@@ -93,7 +92,6 @@ FrameLabStatus acquire(const InitDesc& d, SessionRef& out, uint32_t& ngxResult, 
         return FRAMELAB_INVALID_ARGUMENT;
     auto& r = registry();
     const std::lock_guard lock(r.mutex);
-    if (r.exclusive) return FRAMELAB_BUSY;
     if (r.references) {
         if (identity.Get() != r.identity.Get() || r.project != d.projectId || r.engine != d.engineVersion ||
             r.runtime != d.runtimeDirectory || r.logs != d.logDirectory)
@@ -129,22 +127,6 @@ FrameLabStatus acquire(const InitDesc& d, SessionRef& out, uint32_t& ngxResult, 
     r.references = 1;
     out.held_ = true;
     return FRAMELAB_OK;
-}
-
-bool claimExclusive() noexcept
-{
-    auto& r = registry();
-    const std::lock_guard lock(r.mutex);
-    if (r.exclusive || r.references) return false;
-    r.exclusive = true;
-    return true;
-}
-
-void releaseExclusive() noexcept
-{
-    auto& r = registry();
-    const std::lock_guard lock(r.mutex);
-    r.exclusive = false;
 }
 
 } // namespace framelab::d3d12::ngx
