@@ -314,6 +314,14 @@ public:
 
   void prepareFrame() override
   {
+    // FL-17 run 4, diagnostic only (never a fix): complete all of frame N's GPU work on every
+    // queue before frame N+1 is recorded. Enabled only with FRAMELAB_DIAG_CROSSFRAME_WAIT=1.
+    static const bool diagCrossFrameWait=[]{const char* v=std::getenv("FRAMELAB_DIAG_CROSSFRAME_WAIT");return v&&v[0]=='1';}();
+    if(diagCrossFrameWait){
+      NVVK_CHECK(vkDeviceWaitIdle(m_device));
+      static bool announced=false;
+      if(!announced){announced=true;std::printf("FL17_DIAG_CROSSFRAME_WAIT=1\n");}
+    }
     if(useManagedSwapchain()){
       // Apply UI/key changes between frames, before acquiring a swapchain image.
       if(directSwapchainDirty)recreateDirectSwapchain(int(m_size.width),int(m_size.height),directRequestedVsync);
